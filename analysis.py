@@ -5,7 +5,7 @@ Functions to do form drag analysis.
 import numpy as np
 from matplotlib import delaunay
 import netCDF4 as netCDF
-import glob.glob as glob
+import glob
 import tracpy
 from scipy import ndimage
 import octant
@@ -57,17 +57,20 @@ def run():
     '''
 
     # What files to use
-    files = glob('ocean_his_000?.nc') # PLACE HOLDER FOR NOW
-
-    # What time indices to use
-    tinds = np.arange(200) # PLACE HOLDER FOR NOW
+    lochis = '/Volumes/Emmons/ai65/OUT/'
+    files = glob.glob(lochis + 'ocean_his_00??.nc') # PLACE HOLDER FOR NOW
 
     # File objects
     nc = netCDF.MFDataset(files)
 
+    # What time indices to use
+    tinds = np.arange(9) # PLACE HOLDER FOR NOW
+
     # grid information
-    loc = grid.nc # PLACEHOLDER
-    grid = tracpy.inout.readgrid(loc)
+    # loc = grid.nc # PLACEHOLDER
+    grid = tracpy.inout.readgrid(files[0])
+    dx = 1./grid['pm'][0,0]
+    dy = 1./grid['pn'][0,0]
     # xr = nc.variables['x_rho'][:] # [y,x], rho grid
     # yr = nc.variables['y_rho'][:] # [y,x], rho grid
     # dx = xr[0,1] - xr[0,0] # uniform grid spacing
@@ -83,12 +86,17 @@ def run():
     dhdy, dhdx = np.gradient(h, dx, dy) # [y,x], rho grid
 
     # Need depths in time
-    zw = octant.depths.get_zw(grid['Vtransform'], grid['Vstretching'], 
-            grid['km']+1, grid['theta_s'], grid['theta_b'], 
-            h.T.copy(order='c'), grid['hc'], zeta=zeta, Hscale=3)
-    zr = octant.depths.get_zrho(grid['Vtransform'], grid['Vstretching'], 
-            grid['km'], grid['theta_s'], grid['theta_b'], 
-            h.T.copy(order='c'), grid['hc'], zeta=zeta, Hscale=3)
+    # grid['theta_s'] = 0.001 # is actually 0
+    # loop through times
+    zw = np.empty((tinds.size, grid['km']+1, h.shape[0], h.shape[1]))
+    zr = np.empty((tinds.size, grid['km'], h.shape[0], h.shape[1]))
+    for i,tind in enumerate(tinds):
+        zw[i,:] = octant.depths.get_zw(grid['Vtransform'], grid['Vstretching'], 
+                grid['km']+1, grid['theta_s'], grid['theta_b'], 
+                h, grid['hc'], zeta=zeta[tind,:,:], Hscale=3)
+        zr[i,:] = octant.depths.get_zrho(grid['Vtransform'], grid['Vstretching'], 
+                grid['km'], grid['theta_s'], grid['theta_b'], 
+                h, grid['hc'], zeta=zeta[tind,:,:], Hscale=3)
 
     # Transect x,y locations in real space
     # NEED GRID TO SEE WHAT THESE ARE, AND NEED IN X,Y NOT LON/LAT
