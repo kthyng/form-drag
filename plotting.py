@@ -11,6 +11,8 @@ from skimage import color
 from matplotlib import cm
 import matplotlib as mpl
 from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes, mark_inset
+from mpl_toolkits.basemap import Basemap
+from matplotlib.ticker import MaxNLocator
 
 mpl.rcParams.update({'font.size': 16})
 mpl.rcParams['font.sans-serif'] = 'Arev Sans, Bitstream Vera Sans, Lucida Grande, Verdana, Geneva, Lucid, Helvetica, Avant Garde, sans-serif'
@@ -32,99 +34,92 @@ mpl.rcParams['mathtext.fallback_to_cm'] = 'True'
 mat = scipy.io.loadmat('cascadia_gridded.mat')
 
 # x and y limits for these plots
-lonlimsPS = [-123.21, -122.15];
-latlimsPS = [47.02, 48.82];
-lonlimsAI = [-122.8, -122.54]
-latlimsAI = [47.9665, 48.227]
-lonlimsAH = [-122.71, -122.65]
-latlimsAH = [48.12, 48.18]
+lonlimsPS = np.array([-124., -122.15]) #-123.21, -122.15])
+latlimsPS = np.array([47.02, 48.82])
+lonlimsAI = np.array([-122.85, -122.535])
+latlimsAI = np.array([47.9665, 48.228])
+lonlimsAH = np.array([-122.72, -122.62])
+latlimsAH = np.array([48.12, 48.18])
 
 # Functionality copied from https://github.com/clawpack/geoclaw/blob/master/src/python/geoclaw/topotools.py#L873
 land_cmap = plt.get_cmap('Greens_r')
 sea_cmap = plt.get_cmap('Blues_r')
-cmapPS = colormaps.add_colormaps((land_cmap, sea_cmap), 
-                                data_limits=[-325,2500],
-                                data_break=0.0)
-cmapAI = colormaps.add_colormaps((land_cmap, sea_cmap), 
-                                data_limits=[-200,175],
-                                data_break=0.0)
-cmapAH = colormaps.add_colormaps((land_cmap, sea_cmap), 
-                                data_limits=[-110,50],
-                                data_break=0.0)
+cmapPS = colormaps.add_colormaps((land_cmap, sea_cmap), data_limits=[-375,2500], data_break=0.0)
+cmapAI = 'Blues_r'
+cmapAH = 'Blues_r'
 
 # levels to plot
-levsPS = np.concatenate((np.arange(-325, 0, 25), np.arange(0,3000,500)))
-levsAI = np.concatenate((np.arange(-200, 0, 20), np.arange(0,350,175))) #200,25)))
-levsAH = np.concatenate((np.arange(-120, 0, 20), np.arange(0,100,50)))
+levsPS = np.concatenate((np.arange(-375, 0, 25), np.arange(0,3000,500)))
+levsAI = np.arange(-200, 20, 20)
+levsAH = np.arange(-120, 15, 15)
 
+# use basemap
+basemapPS = Basemap(llcrnrlon=lonlimsPS[0], llcrnrlat=latlimsPS[0], 
+                urcrnrlon=lonlimsPS[1], urcrnrlat=latlimsPS[1], 
+                lat_0=latlimsPS.mean(), lon_0=lonlimsPS.mean(),
+                projection='lcc', resolution='f',
+                area_thresh=0.)
+xPS, yPS = basemapPS(mat['lon_topo'], mat['lat_topo'])
+xlimsAI, ylimsAI = basemapPS(lonlimsAI, latlimsAI)
+xlimsAH, ylimsAH = basemapPS(lonlimsAH, latlimsAH)
 
 # Make Puget Sound plot
 fig = plt.figure(figsize=(16,16))
 axPS = fig.add_subplot(111)
-mappablePS = axPS.contourf(mat['lon_topo'], mat['lat_topo'], mat['z_topo'], cmap=cmapPS, levels=levsPS)
-# outline coast in case plot is printed
-axPS.contour(mat['lon_topo'], mat['lat_topo'], mat['z_topo'], [0], lw=3, colors='0.15')
-axPS.set_xlim(lonlimsPS)
-axPS.set_ylim(latlimsPS)
-axPS.set_xlabel('Longitude [degrees]')
-axPS.set_ylabel('Latitude [degrees]')
-# Turn off annoying offset, from https://github.com/clawpack/geoclaw/blob/master/src/python/geoclaw/topotools.py#L844
-axPS.ticklabel_format(format="plain", useOffset=False)
-plt.xticks(rotation=20)
-cbPS = fig.colorbar(mappablePS)
+basemapPS.drawcoastlines(ax=axPS)
+mappablePS = axPS.contourf(xPS, yPS, mat['z_topo'], cmap=cmapPS, levels=levsPS, zorder=2)
+locator = MaxNLocator(6) # if you want no more than 10 contours
+locator.create_dummy_axis()
+locator.set_bounds(lonlimsPS[0], lonlimsPS[1])
+pars = locator()
+locator = MaxNLocator(6) # if you want no more than 10 contours
+locator.create_dummy_axis()
+locator.set_bounds(latlimsPS[0], latlimsPS[1])
+mers = locator()
+basemapPS.drawparallels(mers, dashes=(1, 1), linewidth=0.15, labels=[1,0,0,0], ax=axPS)#, zorder=3)
+basemapPS.drawmeridians(pars, dashes=(1, 1), linewidth=0.15, labels=[0,0,0,1], ax=axPS)#, zorder=3)
+cbPS = fig.colorbar(mappablePS, pad=0.015, aspect=35)
 cbPS.set_label('Height/depth [m]')
-plt.tight_layout()
 # Label
-axPS.text(0.7, 0.025, 'Puget Sound', transform=axPS.transAxes, color='0.15')
-
+axPS.text(0.8, 0.025, 'Puget Sound', transform=axPS.transAxes, color='0.15')
 
 # Inset magnified plot of Admiralty Inlet
 axAI = zoomed_inset_axes(axPS, 2, loc=1)
-mappableAI = axAI.contourf(mat['lon_topo'], mat['lat_topo'], mat['z_topo'], cmap=cmapAI, levels=levsAI)
-# outline coast in case plot is printed
-axAI.contour(mat['lon_topo'], mat['lat_topo'], mat['z_topo'], [0], lw=3, colors='0.15')
-axAI.set_xlim(lonlimsAI)
-axAI.set_ylim(latlimsAI)
-# turn off ticks
-plt.xticks(visible=False)
-plt.yticks(visible=False)
-plt.setp(axAI,xticks=[],yticks=[])
+basemapPS.drawcoastlines(ax=axAI)
+basemapPS.fillcontinents('darkgreen', ax=axAI)
+mappableAI = axAI.contourf(xPS, yPS, mat['z_topo'], cmap=cmapAI, levels=levsAI)
+axAI.set_xlim(xlimsAI)
+axAI.set_ylim(ylimsAI)
 # Inlaid colorbar
-caxAI = fig.add_axes([0.735, 0.77, 0.0125, 0.2])
+caxAI = fig.add_axes([0.582, 0.665, 0.011, 0.1])
 cbAI = plt.colorbar(mappableAI, cax=caxAI, orientation='vertical')
+cbAI.ax.tick_params(labelsize=12)
 # draw a bbox of the region of the inset axes in the parent axes and
 # connecting lines between the bbox and the inset axes area
-mark_inset(axPS, axAI, loc1=2, loc2=4, fc="none", ec="0.3", lw=1.5)
+mark_inset(axPS, axAI, loc1=2, loc2=4, fc="none", ec="0.3", lw=1.5, zorder=5)
 # Label
-axAI.text(0.044, 0.04, 'Admiralty Inlet', transform=axAI.transAxes, color='0.15')
-
+axAI.text(0.41, 0.83, 'Admiralty\n      Inlet', transform=axAI.transAxes, color='0.15', fontsize=16)
 
 # Inset magnified plot of Admiralty Head
-axAH = zoomed_inset_axes(axPS, 8, loc=3)
-mappableAH = axAH.contourf(mat['lon_topo'], mat['lat_topo'], mat['z_topo'], cmap=cmapAH, levels=levsAH)
-# outline coast in case plot is printed
-axAH.contour(mat['lon_topo'], mat['lat_topo'], mat['z_topo'], [0], lw=3, colors='0.15')
-axAH.set_xlim(lonlimsAH)
-axAH.set_ylim(latlimsAH)
-# turn off ticks
-plt.xticks(visible=False)
-plt.yticks(visible=False)
-plt.setp(axAH,xticks=[],yticks=[])
+axAH = zoomed_inset_axes(axPS, 9, loc=3)
+basemapPS.drawcoastlines(ax=axAH)
+basemapPS.fillcontinents('darkgreen', ax=axAH)
+mappableAH = axAH.contourf(xPS, yPS, mat['z_topo'], cmap=cmapAH, levels=levsAH)
+axAH.set_xlim(xlimsAH)
+axAH.set_ylim(ylimsAH)
 # Inlaid colorbar
-caxAH = fig.add_axes([0.35, 0.1, 0.0125, 0.2])
+caxAH = fig.add_axes([0.399, 0.116, 0.012, 0.15])
 cbAH = plt.colorbar(mappableAH, cax=caxAH, orientation='vertical')
+cbAH.ax.tick_params(labelsize=12)
 # draw a bbox of the region of the inset axes in the parent axes and
 # connecting lines between the bbox and the inset axes area
-mark_inset(axPS, axAH, loc1=2, loc2=4, fc="none", ec="0.3", lw=1.5)
+mark_inset(axPS, axAH, loc1=2, loc2=4, fc="none", ec="0.3", lw=1.5, zorder=5)
 # Label
-axAH.text(0.45, 0.92, 'Admiralty Head', transform=axAH.transAxes, color='0.15')
-
-plt.draw()
-plt.show()
+axAH.text(0.47, 0.92, 'Admiralty Head', transform=axAH.transAxes, color='0.15', fontsize=16)
 
 # Save figure
-fig.savefig('figures/domains.png')
-fig.show()
+fig.savefig('figures/domains.png', bbox_inches='tight')
+# fig.show()
 
 
 # ### Plot Bathymetry of just Admiralty Inlet ###

@@ -9,6 +9,9 @@ import glob
 import tracpy
 from scipy import ndimage
 import octant
+import pdb
+import matplotlib.pyplot as plt
+import tracpy.plotting
 
 # def interp2pt(xvar, yvar, zvar, var, xint, yint, zint):
 #     '''
@@ -50,6 +53,14 @@ import octant
 
 #     # Interpolate 1D in z onto zint.
 
+def plot_domain(grid):
+    '''
+    Plot the domain and then choose end points of a transect.
+    '''
+
+    pdb.set_trace()
+
+
 
 def run():
     '''
@@ -68,13 +79,17 @@ def run():
 
     # grid information
     # loc = grid.nc # PLACEHOLDER
-    grid = tracpy.inout.readgrid(files[0])
+
+    grid = tracpy.inout.readgrid(files[0], llcrnrlon=-122.8, llcrnrlat=47.9665, 
+                                            urcrnrlon=-122.54, urcrnrlat=48.227, 
+                                            lat_0=48, lon_0=-122.7, usebasemap=True, res='f')
     dx = 1./grid['pm'][0,0]
     dy = 1./grid['pn'][0,0]
-    # xr = nc.variables['x_rho'][:] # [y,x], rho grid
-    # yr = nc.variables['y_rho'][:] # [y,x], rho grid
-    # dx = xr[0,1] - xr[0,0] # uniform grid spacing
-    # dy = yr[1,0] - yr[0,0] # uniform grid spacing
+
+    # Transect x,y locations in real space
+    # NEED GRID TO SEE WHAT THESE ARE, AND NEED IN X,Y NOT LON/LAT
+    # xt, yt
+    xt, yt = plot_domain(grid)
 
     # Calculate required fields at native points on grid. Need:
     # rho, u, v, dh/dx, dh/dy, where h is the bathymetry
@@ -97,10 +112,6 @@ def run():
         zr[i,:] = octant.depths.get_zrho(grid['Vtransform'], grid['Vstretching'], 
                 grid['km'], grid['theta_s'], grid['theta_b'], 
                 h, grid['hc'], zeta=zeta[tind,:,:], Hscale=3)
-
-    # Transect x,y locations in real space
-    # NEED GRID TO SEE WHAT THESE ARE, AND NEED IN X,Y NOT LON/LAT
-    # xt, yt
 
     # Convert transect locations from x,y space to grid index space
     xti, yti, dt = tracpy.tools.interpolate2d(xt, yt, grid, 'd_xy2ij')
