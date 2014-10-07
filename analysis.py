@@ -68,54 +68,48 @@ def plot_domain(grid, nc, dd=65):
     # pdb.set_trace()
     lont, latt = grid['basemap'](xt, yt, inverse=True)
 
-    # Add transect to larger domain plot and save
-    plotting.ps(dosave=True, fname='figures/domains-transect.png', lont=lont, latt=latt)
+    # save transect lat/lon for future use
+    np.save('transect_lonlat.npz', lont=lont, latt=latt)
 
     return lont, latt, theta, dd
 
 
-
-def run():
+def get_vars(nc, tinds, grid):
     '''
-    Controlling script.
+    Get and calculate some necessary fields for calculations.
+
+    Inputs:
+     nc         netCDF file object
+     tinds      Time indices
+     grid       Grid dictionary from TracPy
+
+    Outputs:
+     rho        Density with 1000 added in to be about 1023 [kg/m^3]
+     u,v        x and y direction velocities
+     dhdx       x-component of bathymetric gradient - only need one to 
+                get along-transect component
+     zr         Depths at vertical rho-grid points
+     dzr        Layer thicknesses of the vertical layers
     '''
 
-    # What files to use
-    lochis = '/Volumes/Emmons/ai65/OUT/'
-    files = glob.glob(lochis + 'ocean_his_00??.nc') # PLACE HOLDER FOR NOW
-
-    # File objects
-    nc = netCDF.MFDataset(files)
-
-    # What time indices to use
-    tinds = np.arange(9) # PLACE HOLDER FOR NOW
-
-    # grid information
-    # loc = grid.nc # PLACEHOLDER
-
-    grid = tracpy.inout.readgrid(files[0], llcrnrlon=-122.8, llcrnrlat=47.9665, 
-                                            urcrnrlon=-122.54, urcrnrlat=48.227, 
-                                            lat_0=48, lon_0=-122.7, usebasemap=True, res='i')
-    dx = 1./grid['pm'][0,0]
-    dy = 1./grid['pn'][0,0]
-
-    # Transect x,y locations in real space and angle of transect
-    lont, latt, theta, dd = plot_domain(grid, nc)
-
-    # Calculate required fields at native points on grid. Need:
-    # rho, u, v, dh/dx, dh/dy, where h is the bathymetry
+    ## Read in variables ##
     rho = nc.variables['rho'][tinds,:,:,:] # [t,z,y,x], rho grid
     u = nc.variables['u'][tinds,:,:,:] # [t,z,y,x], u grid
     v = nc.variables['v'][tinds,:,:,:] # [t,z,y,x], v grid
-    zeta = nc.variables['zeta'][tinds,:,:] # [t,y,x], ssh, rho grid
     h = nc.variables['h'][:,:] # [y,x], rho grid
+    dx = 1./grid['pm'][0,0]
+    dy = 1./grid['pn'][0,0]
     dhdy, dhdx = np.gradient(h, dx, dy) # [y,x], rho grid
 
-    # Need depths in time
-    # grid['theta_s'] = 0.001 # is actually 0
-    # loop through times
+
+    ## Calculate depths in time ##
+
+    # Need ssh for calculating the depths
+    zeta = nc.variables['zeta'][tinds,:,:] # [t,y,x], ssh, rho grid
+
     zw = np.empty((tinds.size, grid['km']+1, h.shape[0], h.shape[1]))
     zr = np.empty((tinds.size, grid['km'], h.shape[0], h.shape[1]))
+    # loop through times
     for i,tind in enumerate(tinds):
         zw[i,:] = octant.depths.get_zw(grid['Vtransform'], grid['Vstretching'], 
                 grid['km']+1, grid['theta_s'], grid['theta_b'], 
@@ -127,9 +121,25 @@ def run():
     # Get layer thicknesses
     dzr = zw[:,1:,:,:] - zw[:,:-1,:,:]
 
-    # Convert transect locations from x,y space to grid index space
-    xgt, ygt, dt = tracpy.tools.interpolate2d(lont, latt, grid, 'd_ll2ij')
-    zgt = np.arange(rho.shape[1]) # keep output at the layer locations in grid space
+    return rho+1000, u, v, dhdx, zr, dzr
+
+
+def interp2transect(sizes, rho, u, v, zr, dzr, dhdx, h, pts, theta):
+    '''
+    Interpolate from planar space to along the transect (x' direction) 
+    in x,y, often bringing the time and vertical dimensions along 
+    (which are not interpolated in).
+
+    Inputs:
+     sizes          [time,z,x'] array sizes
+     rho, u, v, zr,
+     dzr, dhdx, h   Fields to be interpolated
+     pts            Points in grid space to find the fields at
+     theta          Angle of the transect line
+
+    Outputs:
+     fields at the transect locations
+    '''
 
     # Interpolate in 3D grid space to transect. The z direction can
     # be ignored for now because it will just go to the same part of 
@@ -137,13 +147,13 @@ def run():
     # x' along-transect
     # [t,z(grid),y,x] --> [t,z(grid),x'] -->[t,z(real),x']
     # First, loop in time and z, then interpolate in x and y while leaving z
-    rhot = np.empty((tinds.size, zgt.size, xgt.size))
-    ut = np.empty((tinds.size, zgt.size, xgt.size))
-    vt = np.empty((tinds.size, zgt.size, xgt.size))
-    zrt = np.empty((tinds.size, zgt.size, xgt.size))
-    dzrt = np.empty((tinds.size, zgt.size, xgt.size)) # layer thicknesses
+    rhot = np.empty(sizes)
+    ut = np.empty(sizes)
+    vt = np.empty(sizes)
+    zrt = np.empty(sizes)
+    dzrt = np.empty(sizes) # layer thicknesses
     for i,tind in enumerate(tinds): # loop through time
-        for k in xrange(zgt.size): # loop through vertical layers
+        for k in xrange(sizes[1]): # loop through vertical layers
             # have to manipulate mask for this to work out
             rhotemp = rho[i,k,:,:].data
             ind = rhotemp>100 # catch masked values
@@ -166,33 +176,42 @@ def run():
             dzrt[i,k,:] = ndimage.map_coordinates(dzr[i,k,:,:], np.array([ygt, xgt]), 
                                     order=1, mode='nearest',cval=0.)
 
-    # Add 1000 to density values
-    rhot = rhot + 1000
-
     # don't need to loop for bathymetry
     dhdxt = ndimage.map_coordinates(dhdx, np.array([ygt, xgt]), order=1, mode='nearest',cval=0.)
-    dhdyt = ndimage.map_coordinates(dhdy, np.array([ygt, xgt]), order=1, mode='nearest',cval=0.)
-    # depths along the transect
-    ht = ndimage.map_coordinates(h, np.array([ygt, xgt]), order=1, mode='nearest',cval=0.)
-
-    # Calculate height of bump
-    HT = ht.max()-ht.min()
-    # check the depths along the transect
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    ax.plot(-ht)
-    fig.show()
-    print 'the height of the bump is ', HT
+    # dhdyt = ndimage.map_coordinates(dhdy, np.array([ygt, xgt]), order=1, mode='nearest',cval=0.)
 
     # Calculate along-track direction (transect goes from left to right in the domain)
     dhdt = dhdxt/np.cos(theta)
+
+    # depths along the transect
+    ht = ndimage.map_coordinates(h, np.array([ygt, xgt]), order=1, mode='nearest',cval=0.)
+
+    return rhot, ut, vt, zrt, dzrt, dhdt, ht
+
+
+def form_drag(z0, dd, HT, sizes, zrt, dzrt, rhot, dhdt):
+    '''
+    Calculate the surface and internal form drag terms.
+
+    Inputs:
+     z0         Critical depth between internal and surface form drag definitions
+     dd         Distance along transect between points [m]
+     HT         Height of bump [m]
+     sizes      [time,x'] array sizes
+     zrt,dzrt   Depths/layer thicknesses along transect
+     rhot       Densities along transect
+     dhdt       Bathymetry gradient along transect
+
+    Outputs:
+     Dfi        Internal form drag in time [N/m^2]
+     Dfs        Surface form drag in time [N/m^2]
+    '''
 
     # Perform integrations:
 
     # --- Integrate vertically. Integrate below and above critical depth easily, and include 
     # a weighting of the percent of depth used for layers that cross z0
     # [t,z,x'] --> [t,x']
-    z0 = -10 # critical depth for integrating surface vs. internal components
     Dfit = np.empty((tinds.size,xgt.size)) # internal form drag
     Dfst = np.empty((tinds.size,xgt.size)) # surface form drag
     # pdb.set_trace()
@@ -208,8 +227,6 @@ def run():
             dz = ((zrt[i,iz0+1,j]-z0)/dzrt[i,iz0,j])*abs(z0) # fraction of layer above z0 * z0 to get in meters
             Dfst[i,j] = Dfst[i,j] + rhot[i,iz0,j]*dz # addition of part of layer that includes z0
 
-    pdb.set_trace()
-
     # --- Integrate along track, [t,x'] --> [t]
     # Note that Dfi and Dfs have already been divided by W, the width of the bump
     g = 9.81 # gravity
@@ -220,9 +237,133 @@ def run():
     Dfi = Dfi/HT
     Dfs = Dfs/HT
 
+    return Dfi, Dfs
 
-    # Calculate the bottom friction
-    # MAKE SURE UNITS ARE THE SAME IN THE END
+
+def bottom_friction(nc, ut, vt, theta, dd):
+    '''
+    Calculate the bottom friction.
+
+    Inputs:
+     nc         netCDF file object
+     ut, vt     u,v velocities along transect [t,z,x']
+     theta      Angle of transect line
+     dd         Distance along transect between points [m]
+
+    Outputs:
+     Dbbl       Drag due to bottom friction [N/m^2]
+    '''
+
+    rho0 = nc.variables['rho0'][:] # background density
+    CD = nc.variables['rdrg2'][:] # is this correct???
+    st = np.sqrt(ut[:,0,:]**2+vt[:,0,:]**2)
+    taubxt = rho0 * CD * ut[:,0,:] / st # take velocity at bottom/seabed
+    # taubyt = rho0 * CD * vt / s
+
+    # Calculate along-track direction (transect goes from left to right in the domain)
+    taubt = taubxt/np.cos(theta)
+
+    # Then average along the track, multiply by W, and divide by HT
+    # [t,x'] --> [t]
+    Dbbl = taubt.mean(axis=1) # along-track average
+    W = dd*xgt.size # width of transect/bump
+    Dbbl = Dbbl*W/HT
+
+    return Dbbl
+
+
+def plot_drag(tinds, Dfi, Dfs, Dbbl, ut):
+    '''
+    Plot the components of drag in time. Follow Edwards et al paper layout.
+    '''
+
+    fig = figure()
+
+    # Plot form drag components
+    ax1 = fig.add_subplot(1,3,1)
+    ax1.plot(tinds, Dfi, 'k', lw=3)
+    ax1.plot(tinds, Dfs, 'k', lw=2, alpha=0.6)
+    ax1.set_ylabel('D_{FORM} (WH_T)^{-1} [Nm^{-2}]')
+    fig.legend(('Internal', 'Surface'))
+
+    # Plot bottom friction component
+    ax2 = fig.add_subplot(1,3,2)
+    ax2.plot(tinds, Dbbl, 'k', lw=3)
+    ax2.set_ylabel('D_{BBL} (WH_T)^{-1} [Nm^{-2}]')
+
+    # Plot the velocity signal - start with U but change to PCA version soon
+    # UPDATE THIS
+    ax3 = fig.add_subplot(1,3,3)
+    ax3.plot(tinds, ut, 'k', lw=3)
+    ax3.set_ylabel('u [ms^{-1}]')
+    ax3.set_xlabel('Time')
+
+    # ADD ALL THE LABELS
+
+    fig.savefig('figures/drag.pdf', bbox_inches='tight')
+
+
+def run():
+    '''
+    Controlling script.
+    '''
+
+    # What files to use
+    lochis = '/Volumes/Emmons/ai65/OUT/'
+    files = glob.glob(lochis + 'ocean_his_00??.nc') # PLACE HOLDER FOR NOW
+
+    # File objects
+    nc = netCDF.MFDataset(files)
+
+    # What time indices to use
+    tinds = np.arange(9) # PLACE HOLDER FOR NOW
+
+    # grid information
+    grid = tracpy.inout.readgrid(files[0], llcrnrlon=-122.8, llcrnrlat=47.9665, 
+                                            urcrnrlon=-122.54, urcrnrlat=48.227, 
+                                            lat_0=48, lon_0=-122.7, usebasemap=True, res='i')
+
+    # Transect x,y locations in real space and angle of transect
+    lont, latt, theta, dd = plot_domain(grid, nc)
+
+    # Calculate required fields at native points on grid. 
+    # Need: rho, u, v, dh/dx, dh/dy, where h is the bathymetry
+    rho, u, v, dhdx, zr, dzr = get_vars(nc, tinds, grid)
+
+    # Convert transect locations from x,y space to grid index space
+    xgt, ygt, dt = tracpy.tools.interpolate2d(lont, latt, grid, 'd_ll2ij')
+    zgt = np.arange(rho.shape[1]) # keep output at the layer locations in grid space
+
+    # Array lengths: time, vertical layers, transect lengths
+    tl = tinds.size; zl = zgt.size; xl = xgt.size
+
+    # Find fields at transect locations
+    rhot, ut, vt, zrt, dzrt, dhdt, ht = interp2transect((tl, zl, xl), rho, u, v, zr, dzr, 
+                                                        dhdx, h, np.array([ygt, xgt]), theta)
+
+    # Calculate height of bump
+    HT = ht.max()-ht.min()
+    # check the depths along the transect
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.plot(np.arange(xgt.size)*dd, -ht, '0.2', lw=3)
+    ax.set_xlabel('Distance along transect [m]')
+    ax.set_ylabel('Depth [m]')
+    fig.show()
+
+    # Add transect to larger domain plot and depths and save
+    plotting.ps(dosave=True, fname='figures/domains-transect.png', lont=lont, latt=latt, ht=ht, dd=dd)
+
+    # Integrate to get form drag terms
+    z0 = -10 # critical depth for integrating surface vs. internal components
+    Dfi, Dfs = form_drag(z0, dd, HT, (tl,xl), zrt, dzrt, rhot, dhdt)
+
+    # Calculate the bottom friction from ROMS
+    Dbbl = bottom_friction(nc, ut, vt, theta, dd)
+
+    # Plot drag results
+    plot_drag(tinds, Dfi, Dfs, Dbbl, ut)
+
 
 if __name__ == "__main__":
     run() 

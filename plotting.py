@@ -27,7 +27,7 @@ mpl.rcParams['mathtext.sf'] = 'sans'
 mpl.rcParams['mathtext.fallback_to_cm'] = 'True'
 
 
-def ps(dosave=True, fname='figures/domains.png', lont=[], latt=[]):
+def ps(dosave=True, fname='figures/domains.png', lont=None, latt=None, ht=None, dd=None):
     '''
     Plot Bathymetry of Puget Sound, Admiralty Inlet, and Admiralty Head
 
@@ -35,6 +35,8 @@ def ps(dosave=True, fname='figures/domains.png', lont=[], latt=[]):
      dosave     Save figure
      fname      File name for figure
      lont, latt transect points to plot if they are input
+     ht         Depth along transect, if input
+     dd         Distance in meters along transect
     '''
 
     # download bathymetry, which can be found at: http://figshare.com/preview/_preview/1165560 (27.3MB)
@@ -131,6 +133,8 @@ def ps(dosave=True, fname='figures/domains.png', lont=[], latt=[]):
     mark_inset(axPS, axAH, loc1=2, loc2=4, fc="none", ec="0.3", lw=1.5, zorder=5)
     # Label
     axAH.text(0.47, 0.92, 'Admiralty Head', transform=axAH.transAxes, color='0.15', fontsize=16)
+
+    pdb.set_trace()
 
     # Save figure
     if dosave:
