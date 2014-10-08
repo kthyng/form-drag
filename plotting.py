@@ -120,11 +120,11 @@ def ps(dosave=True, fname='figures/domains.png', lont=None, latt=None, ht=None, 
     axAH.set_ylim(ylimsAH)
 
     if plt.is_numlike(lont):
-        # add points if you have some
-        xt, yt = basemapPS(lont, latt)
-        axAH.plot(xt, yt, 'k', lw=3)
+            # add points if you have some
+            xt, yt = basemapPS(lont, latt)
+            axAH.plot(xt, yt, 'k', lw=3)
 
-    # Inlaid colorbar
+        # Inlaid colorbar
     caxAH = fig.add_axes([0.398, 0.116, 0.012, 0.15])
     cbAH = plt.colorbar(mappableAH, cax=caxAH, orientation='vertical')
     cbAH.ax.tick_params(labelsize=12)
@@ -134,7 +134,22 @@ def ps(dosave=True, fname='figures/domains.png', lont=None, latt=None, ht=None, 
     # Label
     axAH.text(0.47, 0.92, 'Admiralty Head', transform=axAH.transAxes, color='0.15', fontsize=16)
 
-    pdb.set_trace()
+    # pdb.set_trace()
+
+    if plt.is_numlike(lont):
+        # Add axes to plot transect depths
+        axdepths = fig.add_axes([0.28, 0.39, 0.14, 0.075], zorder=11)
+        axdepths.plot((np.arange(lont.size)*dd)/1000., -ht, '0.2', lw=2, zorder=12)
+        axdepths.tick_params(axis='both', colors='0.1', top='off', right='off', width=2, length=4, labelsize=12, labelcolor='0.1')
+        axdepths.spines['bottom'].set_color('none')
+        axdepths.spines['top'].set_color('none')
+        axdepths.spines['left'].set_color('none')
+        axdepths.spines['right'].set_color('none')
+        axdepths.set_xlabel('Distance along transect [km]', fontsize=14, color='0.1')
+        axdepths.set_ylabel('Transect depth [m]', fontsize=14, color='0.1')
+        axdepths.patch.set_alpha(0.0) # make bg transparent
+        fig.show()
+
 
     # Save figure
     if dosave:

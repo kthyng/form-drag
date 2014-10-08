@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import tracpy.plotting
 import tracpy.calcs
 import bisect
+import plotting
 
 
 def plot_domain(grid, nc, dd=65):
@@ -32,7 +33,6 @@ def plot_domain(grid, nc, dd=65):
     '''
 
     # plot magnification of Admiralty Head
-    import plotting
     plotting.ai(grid, 'in') 
 
     # Have user select end points of transect
@@ -69,7 +69,7 @@ def plot_domain(grid, nc, dd=65):
     lont, latt = grid['basemap'](xt, yt, inverse=True)
 
     # save transect lat/lon for future use
-    np.save('transect_lonlat.npz', lont=lont, latt=latt)
+    np.savez('transect_lonlat.npz', lont=lont, latt=latt)
 
     return lont, latt, theta, dd
 
@@ -121,7 +121,7 @@ def get_vars(nc, tinds, grid):
     # Get layer thicknesses
     dzr = zw[:,1:,:,:] - zw[:,:-1,:,:]
 
-    return rho+1000, u, v, dhdx, zr, dzr
+    return rho+1000., u, v, dhdx, zr, dzr
 
 
 def interp2transect(sizes, rho, u, v, zr, dzr, dhdx, h, pts, theta):
@@ -152,39 +152,35 @@ def interp2transect(sizes, rho, u, v, zr, dzr, dhdx, h, pts, theta):
     vt = np.empty(sizes)
     zrt = np.empty(sizes)
     dzrt = np.empty(sizes) # layer thicknesses
-    for i,tind in enumerate(tinds): # loop through time
+    # pdb.set_trace()
+    for i in xrange(sizes[0]): # loop through time
         for k in xrange(sizes[1]): # loop through vertical layers
             # have to manipulate mask for this to work out
             rhotemp = rho[i,k,:,:].data
-            ind = rhotemp>100 # catch masked values
+            ind = rhotemp>2000 # catch masked values
             rhotemp[ind] = 0.
-            rhot[i,k,:] = ndimage.map_coordinates(rhotemp, np.array([ygt, xgt]), 
-                                    order=1, mode='nearest',cval=0.)
+            rhot[i,k,:] = ndimage.map_coordinates(rhotemp, pts, order=1, mode='nearest',cval=0.)
             utemp = u[i,k,:,:].data
             ind = utemp>100 # catch masked values
             utemp[ind] = 0.
-            ut[i,k,:] = ndimage.map_coordinates(utemp, np.array([ygt, xgt]), 
-                                    order=1, mode='nearest',cval=0.)
+            ut[i,k,:] = ndimage.map_coordinates(utemp, pts, order=1, mode='nearest',cval=0.)
             vtemp = v[i,k,:,:].data
             ind = vtemp>100 # catch masked values
             vtemp[ind] = 0.
-            vt[i,k,:] = ndimage.map_coordinates(vtemp, np.array([ygt, xgt]), 
-                                    order=1, mode='nearest',cval=0.)
+            vt[i,k,:] = ndimage.map_coordinates(vtemp, pts, order=1, mode='nearest',cval=0.)
             # these gives the zr value along the transect, in depth
-            zrt[i,k,:] = ndimage.map_coordinates(zr[i,k,:,:], np.array([ygt, xgt]), 
-                                    order=1, mode='nearest',cval=0.)
-            dzrt[i,k,:] = ndimage.map_coordinates(dzr[i,k,:,:], np.array([ygt, xgt]), 
-                                    order=1, mode='nearest',cval=0.)
-
+            zrt[i,k,:] = ndimage.map_coordinates(zr[i,k,:,:], pts, order=1, mode='nearest',cval=0.)
+            dzrt[i,k,:] = ndimage.map_coordinates(dzr[i,k,:,:], pts, order=1, mode='nearest',cval=0.)
+    # pdb.set_trace()
     # don't need to loop for bathymetry
-    dhdxt = ndimage.map_coordinates(dhdx, np.array([ygt, xgt]), order=1, mode='nearest',cval=0.)
-    # dhdyt = ndimage.map_coordinates(dhdy, np.array([ygt, xgt]), order=1, mode='nearest',cval=0.)
+    dhdxt = ndimage.map_coordinates(dhdx, pts, order=1, mode='nearest',cval=0.)
+    # dhdyt = ndimage.map_coordinates(dhdy, pts, order=1, mode='nearest',cval=0.)
 
     # Calculate along-track direction (transect goes from left to right in the domain)
     dhdt = dhdxt/np.cos(theta)
 
     # depths along the transect
-    ht = ndimage.map_coordinates(h, np.array([ygt, xgt]), order=1, mode='nearest',cval=0.)
+    ht = ndimage.map_coordinates(h, pts, order=1, mode='nearest',cval=0.)
 
     return rhot, ut, vt, zrt, dzrt, dhdt, ht
 
@@ -212,11 +208,11 @@ def form_drag(z0, dd, HT, sizes, zrt, dzrt, rhot, dhdt):
     # --- Integrate vertically. Integrate below and above critical depth easily, and include 
     # a weighting of the percent of depth used for layers that cross z0
     # [t,z,x'] --> [t,x']
-    Dfit = np.empty((tinds.size,xgt.size)) # internal form drag
-    Dfst = np.empty((tinds.size,xgt.size)) # surface form drag
+    Dfit = np.empty(sizes) # internal form drag
+    Dfst = np.empty(sizes) # surface form drag
     # pdb.set_trace()
-    for i in xrange(tinds.size): # loop in time
-        for j in xrange(xgt.size): # loop along transect
+    for i in xrange(sizes[0]): # loop in time
+        for j in xrange(sizes[1]): # loop along transect
             iz0 = bisect.bisect(zrt[i,:,j], z0) - 1 # index just below critical depth in depth
             # internal
             Dfit[i,j] = (rhot[i,:iz0,j]*dzrt[i,:iz0,j]).sum(axis=0) # up to the layer below the layer with z0
@@ -230,8 +226,8 @@ def form_drag(z0, dd, HT, sizes, zrt, dzrt, rhot, dhdt):
     # --- Integrate along track, [t,x'] --> [t]
     # Note that Dfi and Dfs have already been divided by W, the width of the bump
     g = 9.81 # gravity
-    Dfi = -g * (Dfit*dhdt[np.newaxis,:].repeat(tinds.size,axis=0)).sum(axis=1)*dd
-    Dfs = -g * (Dfst*dhdt[np.newaxis,:].repeat(tinds.size,axis=0)).sum(axis=1)*dd
+    Dfi = -g * (Dfit*dhdt[np.newaxis,:].repeat(sizes[0],axis=0)).sum(axis=1)*dd
+    Dfs = -g * (Dfst*dhdt[np.newaxis,:].repeat(sizes[0],axis=0)).sum(axis=1)*dd
 
     # Divide the form drags by the height of the bump, HT
     Dfi = Dfi/HT
@@ -240,7 +236,7 @@ def form_drag(z0, dd, HT, sizes, zrt, dzrt, rhot, dhdt):
     return Dfi, Dfs
 
 
-def bottom_friction(nc, ut, vt, theta, dd):
+def bottom_friction(nc, ut, vt, theta, dd, HT):
     '''
     Calculate the bottom friction.
 
@@ -249,6 +245,7 @@ def bottom_friction(nc, ut, vt, theta, dd):
      ut, vt     u,v velocities along transect [t,z,x']
      theta      Angle of transect line
      dd         Distance along transect between points [m]
+     HT         Height of bump [m]
 
     Outputs:
      Dbbl       Drag due to bottom friction [N/m^2]
@@ -266,7 +263,7 @@ def bottom_friction(nc, ut, vt, theta, dd):
     # Then average along the track, multiply by W, and divide by HT
     # [t,x'] --> [t]
     Dbbl = taubt.mean(axis=1) # along-track average
-    W = dd*xgt.size # width of transect/bump
+    W = dd*ut.shape[2] # width of transect/bump
     Dbbl = Dbbl*W/HT
 
     return Dbbl
@@ -277,24 +274,24 @@ def plot_drag(tinds, Dfi, Dfs, Dbbl, ut):
     Plot the components of drag in time. Follow Edwards et al paper layout.
     '''
 
-    fig = figure()
+    fig = plt.figure(figsize=(12,10))
 
     # Plot form drag components
-    ax1 = fig.add_subplot(1,3,1)
+    ax1 = fig.add_subplot(3,1,1)
     ax1.plot(tinds, Dfi, 'k', lw=3)
     ax1.plot(tinds, Dfs, 'k', lw=2, alpha=0.6)
     ax1.set_ylabel('D_{FORM} (WH_T)^{-1} [Nm^{-2}]')
-    fig.legend(('Internal', 'Surface'))
+    ax1.legend(('Internal', 'Surface'))
 
     # Plot bottom friction component
-    ax2 = fig.add_subplot(1,3,2)
+    ax2 = fig.add_subplot(3,1,2)
     ax2.plot(tinds, Dbbl, 'k', lw=3)
     ax2.set_ylabel('D_{BBL} (WH_T)^{-1} [Nm^{-2}]')
 
     # Plot the velocity signal - start with U but change to PCA version soon
     # UPDATE THIS
-    ax3 = fig.add_subplot(1,3,3)
-    ax3.plot(tinds, ut, 'k', lw=3)
+    ax3 = fig.add_subplot(3,1,3)
+    ax3.plot(tinds, ut[:,-1,0], 'k', lw=3)
     ax3.set_ylabel('u [ms^{-1}]')
     ax3.set_xlabel('Time')
 
@@ -337,19 +334,24 @@ def run():
     # Array lengths: time, vertical layers, transect lengths
     tl = tinds.size; zl = zgt.size; xl = xgt.size
 
+    # pdb.set_trace()
+
     # Find fields at transect locations
+    # tracpy grid stuff is transposed due to tracmass
     rhot, ut, vt, zrt, dzrt, dhdt, ht = interp2transect((tl, zl, xl), rho, u, v, zr, dzr, 
-                                                        dhdx, h, np.array([ygt, xgt]), theta)
+                                                        dhdx, np.asarray(grid['h'].T, order='C'), np.array([ygt, xgt]), theta)
 
     # Calculate height of bump
     HT = ht.max()-ht.min()
-    # check the depths along the transect
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    ax.plot(np.arange(xgt.size)*dd, -ht, '0.2', lw=3)
-    ax.set_xlabel('Distance along transect [m]')
-    ax.set_ylabel('Depth [m]')
-    fig.show()
+    # # check the depths along the transect
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111)
+    # ax.plot(np.arange(xgt.size)*dd, -ht, '0.2', lw=3)
+    # ax.set_xlabel('Distance along transect [m]')
+    # ax.set_ylabel('Depth [m]')
+    # fig.show()
+
+    # pdb.set_trace()
 
     # Add transect to larger domain plot and depths and save
     plotting.ps(dosave=True, fname='figures/domains-transect.png', lont=lont, latt=latt, ht=ht, dd=dd)
@@ -359,7 +361,7 @@ def run():
     Dfi, Dfs = form_drag(z0, dd, HT, (tl,xl), zrt, dzrt, rhot, dhdt)
 
     # Calculate the bottom friction from ROMS
-    Dbbl = bottom_friction(nc, ut, vt, theta, dd)
+    Dbbl = bottom_friction(nc, ut, vt, theta, dd, HT)
 
     # Plot drag results
     plot_drag(tinds, Dfi, Dfs, Dbbl, ut)
